@@ -1,0 +1,48 @@
+# Dockerfile.mcp
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+ADD https://astral.sh/uv/install.sh /uv-installer.sh
+RUN sh /uv-installer.sh && rm /uv-installer.sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Configure uv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+# Copy entire project (needed for graphiti-core dependency)
+COPY . .
+
+# Install MCP server dependencies
+WORKDIR /app/mcp_server
+RUN uv sync --frozen --no-dev
+
+# Create non-root user
+RUN groupadd -r app && \
+    useradd -r -d /app -g app app && \
+    chown -R app:app /app
+
+# Switch to non-root user
+USER app
+
+# Environment
+ENV PYTHONUNBUFFERED=1 \
+    PATH="/app/mcp_server/.venv/bin:$PATH" \
+    PORT=8000
+
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Start MCP server
+CMD ["uv", "run", "graphiti_mcp_server.py", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
